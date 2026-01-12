@@ -1,0 +1,19 @@
+# --- Build Artifacts ---
+build/
+bin/
+lib/
+
+# --- Compiled Object Files (Just in case) ---
+*.o
+*.obj
+*.exe
+
+# --- Editor Config ---
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- OS Noise ---
+.DS_Store
+Thumbs.db
