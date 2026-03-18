@@ -17,3 +17,6 @@ lib/
 # --- OS Noise ---
 .DS_Store
 Thumbs.db
+
+#extra(not sure its use, needs to see)
+*.csv
