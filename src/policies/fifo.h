@@ -2,36 +2,41 @@
 #include "../engine/cache.h"
 #include <deque>
 #include <unordered_set>
-#include <iostream>
 
+// First-In First-Out eviction.
+//
+// Data structures:
+//   deque<int>          — tracks insertion order (front = oldest)
+//   unordered_set<int>  — O(1) presence check
+//
+// On hit:  nothing changes (FIFO does not reorder on access)
+// On miss: evict front of deque, insert new item at back
+//
+// Weakness: thrashes on loops larger than cache size.
+// A recently inserted item is protected; a hot item is not.
 class FIFO : public Cache {
 private:
-    std::deque<std::string> queue;        // Tracks order
-    std::unordered_set<std::string> set;  // Fast lookups O(1)
+    std::deque<int>        queue;
+    std::unordered_set<int> set;
 
 public:
     explicit FIFO(std::size_t cap) : Cache(cap) {}
 
-    bool access(std::string key) override {
-        // 1. Check if in cache (Hit)
-        if (set.find(key) != set.end()) {
+    bool access(int id) override {
+        if (set.count(id)) {
             hits++;
             return true;
         }
 
-        // 2. Cache Miss
         misses++;
 
-        // 3. Eviction logic (if full)
         if (queue.size() >= capacity) {
-            std::string victim = queue.front();
+            set.erase(queue.front());
             queue.pop_front();
-            set.erase(victim);
         }
 
-        // 4. Insert new item
-        queue.push_back(key);
-        set.insert(key);
+        queue.push_back(id);
+        set.insert(id);
         return false;
     }
 };

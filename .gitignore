@@ -1,22 +1,28 @@
-# --- Build Artifacts ---
+# Build artifacts
 build/
 bin/
 lib/
 
-# --- Compiled Object Files (Just in case) ---
+# Compiled objects
 *.o
 *.obj
 *.exe
 
-# --- Editor Config ---
+# Compiled binary at project root
+cache_audit
+
+# Editor noise
 .vscode/
 .idea/
 *.swp
 *~
 
-# --- OS Noise ---
+# OS noise
 .DS_Store
 Thumbs.db
 
-#extra(not sure its use, needs to see)
-*.csv
+# Benchmark output (generated, not versioned)
+results/
+
+# Traces are versioned; large corpora are not
+traces/real/

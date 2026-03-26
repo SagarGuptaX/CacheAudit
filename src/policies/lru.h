@@ -1,103 +1,46 @@
 #pragma once
 #include "../engine/cache.h"
+#include <list>
 #include <unordered_map>
-#include <string>
-#include <iostream>
 
+// Least Recently Used eviction.
+//
+// Data structures:
+//   list<int>                              — doubly linked, front = MRU, back = LRU
+//   unordered_map<int, list::iterator>     — O(1) lookup to any node
+//
+// On hit:  splice node to front (O(1) with iterator)
+// On miss: evict back, insert new node at front
+//
+// std::list::splice gives O(1) move-to-front without pointer surgery.
+// The iterator in the map stays valid after splice — that is the key property.
 class LRU : public Cache {
 private:
-    // The node structure for our Doubly Linked List
-    struct Node {
-        std::string key;
-        Node* prev;
-        Node* next;
-        
-        Node(std::string k) : key(k), prev(nullptr), next(nullptr) {}
-    };
-
-    // Pointers to the dummy head and tail
-    Node* head;
-    Node* tail;
-
-    // The O(1) lookup table
-    std::unordered_map<std::string, Node*> map;
-
-    // --- Helper Functions (The "Surgery" Tools) ---
-    
-    // 1. Add a new node right after head (Most Recently Used)
-    void add_node(Node* node) {
-        Node* temp = head->next;
-        
-        node->next = temp;
-        node->prev = head;
-        
-        head->next = node;
-        temp->prev = node;
-    }
-
-    // 2. Remove an existing node from the list
-    void delete_node(Node* node) {
-        Node* prev_node = node->prev;
-        Node* next_node = node->next;
-        
-        prev_node->next = next_node;
-        next_node->prev = prev_node;
-    }
-
-    // 3. Move an existing node to the front
-    void move_to_head(Node* node) {
-        delete_node(node);
-        add_node(node);
-    }
+    std::list<int> order; // front = MRU, back = LRU
+    std::unordered_map<int, std::list<int>::iterator> map;
 
 public:
-    explicit LRU(std::size_t cap) : Cache(cap) {
-        // Initialize Sentinels
-        head = new Node("");
-        tail = new Node("");
-        
-        // Connect them: [Head] <-> [Tail]
-        head->next = tail;
-        tail->prev = head;
-    }
+    explicit LRU(std::size_t cap) : Cache(cap) {}
 
-    ~LRU() {
-        // Cleanup memory to avoid leaks!
-        Node* current = head;
-        while (current != nullptr) {
-            Node* temp = current;
-            current = current->next;
-            delete temp;
-        }
-    }
-
-    bool access(std::string key) override {
-        // 1. Check Hit
-        if (map.find(key) != map.end()) {
-            Node* node = map[key];
-            move_to_head(node); // "Refreshed"
+    bool access(int id) override {
+        auto it = map.find(id);
+        if (it != map.end()) {
+            // Move to MRU position
+            order.splice(order.begin(), order, it->second);
             hits++;
             return true;
         }
 
-        // 2. Handle Miss
         misses++;
-        
+
         if (map.size() >= capacity) {
-            // Evict the LRU (The one before tail)
-            Node* lru_node = tail->prev;
-            
-            // Remove from Map and List
-            map.erase(lru_node->key);
-            delete_node(lru_node);
-            delete lru_node; // Free memory
+            int lru = order.back();
+            order.pop_back();
+            map.erase(lru);
         }
 
-        // 3. Add new node
-        Node* new_node = new Node(key);
-        add_node(new_node);
-        map[key] = new_node;
-        
+        order.push_front(id);
+        map[id] = order.begin();
         return false;
     }
 };

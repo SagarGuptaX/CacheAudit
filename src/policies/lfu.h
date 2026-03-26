@@ -2,91 +2,69 @@
 #include "../engine/cache.h"
 #include <set>
 #include <unordered_map>
-#include <string>
-#include <iostream>
+#include <cstdint>
 
+// Least Frequently Used eviction, with LRU tie-breaking.
+//
+// Data structures:
+//   set<Node>                             — sorted by (freq ASC, last_access ASC)
+//                                           begin() is always the eviction victim
+//   unordered_map<int, set::iterator>     — O(1) lookup to any node
+//
+// Update challenge: std::set elements are immutable once inserted.
+// Solution: remove → update → reinsert (O(log n) but correct).
+//
+// Tie-breaking: two items with equal frequency → evict the one
+// accessed least recently. This makes LFU behave like LRU within
+// the same frequency bucket, which is standard practice.
 class LFU : public Cache {
 private:
-    // We need a global counter to act as a "Timestamp" for tie-breaking
-    uint64_t timer;
+    uint64_t timer = 0;
 
     struct Node {
-        std::string key;
-        mutable int frequency; // Mutable so we can modify it inside a set iterator (carefully!)
-        uint64_t last_access_time;
+        int      key;
+        int      freq;
+        uint64_t last_access;
 
-        // Constructor
-        Node(std::string k, uint64_t t) : key(k), frequency(1), last_access_time(t) {}
-
-        // The Comparator: This defines how the std::set sorts items.
-        // We want the "Smallest" item (victim) to be at the beginning.
-        // Rule: Sort by Frequency ASC, then by Time ASC (LRU).
         bool operator<(const Node& other) const {
-            if (frequency != other.frequency) {
-                return frequency < other.frequency;
-            }
-            return last_access_time < other.last_access_time;
+            if (freq != other.freq) return freq < other.freq;
+            return last_access < other.last_access;
         }
     };
 
-    // The O(log n) sorted structure. 
-    // begin() will always be the victim (Lowest Freq, Oldest Time).
-    std::set<Node> frequency_tree;
-
-    // The O(1) lookup to find nodes quickly
-    std::unordered_map<std::string, std::set<Node>::iterator> lookup;
+    std::set<Node> freq_set;
+    std::unordered_map<int, std::set<Node>::iterator> lookup;
 
 public:
-    explicit LFU(std::size_t cap) : Cache(cap), timer(0) {}
+    explicit LFU(std::size_t cap) : Cache(cap) {}
 
-    bool access(std::string key) override {
-        timer++; // Increment global time
+    bool access(int id) override {
+        timer++;
 
-        // 1. Check for Hit
-        if (lookup.find(key) != lookup.end()) {
-            // HIT LOGIC
+        auto it = lookup.find(id);
+        if (it != lookup.end()) {
             hits++;
-            
-            // We need to update the node's frequency and time.
-            // Problem: You can't modify an element inside a std::set directly 
-            // because it breaks the sort order.
-            // Solution: Remove -> Update -> Re-insert.
-            
-            auto it = lookup[key];
-            Node updated_node = *it; // Copy the data
-            
-            // Update stats
-            updated_node.frequency++;
-            updated_node.last_access_time = timer;
-
-            // Remove old
-            frequency_tree.erase(it);
-            
-            // Re-insert updated node and update lookup map
-            auto result = frequency_tree.insert(updated_node);
-            lookup[key] = result.first;
-            
+            // Remove → update → reinsert
+            Node updated  = *it->second;
+            freq_set.erase(it->second);
+            updated.freq++;
+            updated.last_access = timer;
+            auto result   = freq_set.insert(updated);
+            lookup[id]    = result.first;
             return true;
         }
 
-        // 2. Handle Miss
         misses++;
 
-        // If full, Evict!
         if (lookup.size() >= capacity) {
-            // The "begin()" of the set is guaranteed to be the victim
-            // because of our custom operator<
-            auto victim_it = frequency_tree.begin();
-            
-            lookup.erase(victim_it->key);
-            frequency_tree.erase(victim_it);
+            auto victim = freq_set.begin(); // lowest freq, oldest
+            lookup.erase(victim->key);
+            freq_set.erase(victim);
         }
 
-        // 3. Insert New Item
-        Node new_node(key, timer);
-        auto result = frequency_tree.insert(new_node);
-        lookup[key] = result.first;
-
+        Node n{id, 1, timer};
+        auto result = freq_set.insert(n);
+        lookup[id]  = result.first;
         return false;
     }
 };

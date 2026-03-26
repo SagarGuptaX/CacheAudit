@@ -1,32 +1,31 @@
 #pragma once
-#include <string>
-#include <map>
 #include <cstdint>
+#include <cstddef>
 
-// Abstract Base Class
+// Abstract base class for all cache eviction policies.
+//
+// Design rule: this class knows nothing about strings or traces.
+// It operates on integer IDs only. String handling belongs upstream
+// in the trace loader and key mapper.
 class Cache {
 protected:
     std::size_t capacity;
-    std::size_t size;
-    // Stats counters
-    uint64_t hits = 0;
+    uint64_t hits   = 0;
     uint64_t misses = 0;
 
 public:
-    explicit Cache(std::size_t cap) : capacity(cap), size(0) {}
-    
-    // Virtual Destructor is CRITICAL for inheritance
+    explicit Cache(std::size_t cap) : capacity(cap) {}
     virtual ~Cache() = default;
 
-    // The Core API: Returns true if hit, false if miss
-    virtual bool access(std::string key) = 0;
+    // Core interface. Returns true on hit, false on miss.
+    virtual bool access(int id) = 0;
 
-    // Getters for analysis
-    double get_hit_rate() const {
+    // --- Metrics accessors ---
+    double   get_hit_rate()  const {
         uint64_t total = hits + misses;
-        return total == 0 ? 0.0 : (double)hits / total * 100.0;
+        return total == 0 ? 0.0 : static_cast<double>(hits) / total;
     }
-    
-    uint64_t get_hits() const { return hits; }
-    uint64_t get_misses() const { return misses; }
+    uint64_t get_hits()      const { return hits; }
+    uint64_t get_misses()    const { return misses; }
+    std::size_t get_capacity() const { return capacity; }
 };

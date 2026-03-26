@@ -2,127 +2,124 @@
 #include "../engine/cache.h"
 #include <list>
 #include <unordered_map>
-#include <string>
 #include <algorithm>
 
+// Adaptive Replacement Cache — Megiddo & Modha, FAST 2003.
+//
+// Maintains four lists:
+//   T1 — recently accessed once   (real cache)
+//   T2 — accessed more than once  (real cache)
+//   B1 — ghost of recently evicted from T1
+//   B2 — ghost of recently evicted from T2
+//
+// Parameter p: target size for T1. Adapts at runtime.
+//   Ghost hit in B1 → recency was useful → increase p (grow T1)
+//   Ghost hit in B2 → frequency was useful → decrease p (grow T2)
+//
+// This self-tuning is ARC's core advantage over LRU and LFU.
+// It learns the working set characteristics from the trace itself.
 class ARC : public Cache {
 private:
-    std::size_t p; // Target size for T1
+    std::size_t p = 0;
 
-    std::list<std::string> t1; // Recent
-    std::list<std::string> t2; // Frequent
-    std::list<std::string> b1; // Ghost Recent
-    std::list<std::string> b2; // Ghost Frequent
+    std::list<int> t1, t2, b1, b2;
 
-    enum ListType { T1, T2, B1, B2 };
-    
+    enum class List { T1, T2, B1, B2 };
+
     struct Entry {
-        std::list<std::string>::iterator iter;
-        ListType type;
+        std::list<int>::iterator iter;
+        List list;
     };
-    
-    std::unordered_map<std::string, Entry> map;
 
-    // The core eviction logic from the IBM Paper.
-    // This moves items from Real lists (T) to Ghost lists (B) to make space.
+    std::unordered_map<int, Entry> map;
+
+    // Evict one item from T1 or T2 into the corresponding ghost list.
+    // hit_in_b2: true if the current miss was a ghost hit in B2.
     void replace(bool hit_in_b2) {
-        // Condition: If T1 is not empty AND 
-        // (T1 exceeds target size 'p' OR (hit was in B2 and T1 is exactly 'p'))
-        if (!t1.empty() && (t1.size() > p || (hit_in_b2 && t1.size() == p))) {
-            // Evict LRU from T1 to MRU of B1
-            std::string lru = t1.back();
+        bool prefer_t1 = !t1.empty() &&
+                         (t1.size() > p || (hit_in_b2 && t1.size() == p));
+
+        if (prefer_t1) {
+            int lru = t1.back();
             t1.pop_back();
             b1.push_front(lru);
-            map[lru] = {b1.begin(), B1};
-        } else {
-            // Evict LRU from T2 to MRU of B2
-            std::string lru = t2.back();
+            map[lru] = {b1.begin(), List::B1};
+        } else if (!t2.empty()) {
+            int lru = t2.back();
             t2.pop_back();
             b2.push_front(lru);
-            map[lru] = {b2.begin(), B2};
+            map[lru] = {b2.begin(), List::B2};
         }
     }
 
 public:
-    explicit ARC(std::size_t cap) : Cache(cap), p(0) {}
+    explicit ARC(std::size_t cap) : Cache(cap) {}
 
-    bool access(std::string key) override {
-        // CASE 1: Real Hit (Item is in T1 or T2)
-        if (map.count(key) && (map[key].type == T1 || map[key].type == T2)) {
+    bool access(int id) override {
+        auto it = map.find(id);
+
+        // Case 1: Real hit (T1 or T2)
+        if (it != map.end() && (it->second.list == List::T1 || it->second.list == List::T2)) {
             hits++;
-            Entry e = map[key];
-            
-            // Remove from current list
-            if (e.type == T1) t1.erase(e.iter);
-            else t2.erase(e.iter);
-
-            // Move to MRU of T2 (It is now "Frequent")
-            t2.push_front(key);
-            map[key] = {t2.begin(), T2};
+            if (it->second.list == List::T1) t1.erase(it->second.iter);
+            else                              t2.erase(it->second.iter);
+            t2.push_front(id);
+            map[id] = {t2.begin(), List::T2};
             return true;
         }
 
         misses++;
 
-        // CASE 2: Ghost Hit in B1 (Recency was important!)
-        if (map.count(key) && map[key].type == B1) {
-            // Adapt: Increase target size of T1
+        // Case 2: Ghost hit in B1 → recency matters, grow T1
+        if (it != map.end() && it->second.list == List::B1) {
             std::size_t delta = (b1.size() >= b2.size()) ? 1 : b2.size() / b1.size();
             p = std::min(capacity, p + delta);
-
-            // Make space, then move item to T2
             replace(false);
-            b1.erase(map[key].iter);
-            t2.push_front(key);
-            map[key] = {t2.begin(), T2};
+            b1.erase(it->second.iter);
+            t2.push_front(id);
+            map[id] = {t2.begin(), List::T2};
             return false;
         }
 
-        // CASE 3: Ghost Hit in B2 (Frequency was important!)
-        if (map.count(key) && map[key].type == B2) {
-            // Adapt: Decrease target size of T1 (Favoring T2)
+        // Case 3: Ghost hit in B2 → frequency matters, grow T2
+        if (it != map.end() && it->second.list == List::B2) {
             std::size_t delta = (b2.size() >= b1.size()) ? 1 : b1.size() / b2.size();
-            p = (p > delta) ? p - delta : 0; // Prevent underflow
-
-            // Make space, then move item to T2
+            p = (p > delta) ? p - delta : 0;
             replace(true);
-            b2.erase(map[key].iter);
-            t2.push_front(key);
-            map[key] = {t2.begin(), T2};
+            b2.erase(it->second.iter);
+            t2.push_front(id);
+            map[id] = {t2.begin(), List::T2};
             return false;
         }
 
-        // CASE 4: Complete Miss (Not in any list)
-        
-        // Sub-case A: T1 + B1 is full
+        // Case 4: Complete miss — not in any list
+
+        // Sub-case A: T1 + B1 is at capacity
         if (t1.size() + b1.size() == capacity) {
             if (t1.size() < capacity) {
-                // Discard LRU of B1
+                // Discard oldest ghost from B1
                 map.erase(b1.back());
                 b1.pop_back();
                 replace(false);
             } else {
-                // T1 itself is full. Discard LRU of T1.
+                // T1 alone is full — discard directly from T1
                 map.erase(t1.back());
                 t1.pop_back();
             }
-        } 
-        // Sub-case B: T1 + B1 is not full, but total cache is full
-        else if (t1.size() + b1.size() < capacity && 
+        }
+        // Sub-case B: total directory is at or beyond 2*capacity
+        else if (t1.size() + b1.size() < capacity &&
                  t1.size() + t2.size() + b1.size() + b2.size() >= capacity) {
-            
             if (t1.size() + t2.size() + b1.size() + b2.size() == 2 * capacity) {
-                // Discard LRU of B2
                 map.erase(b2.back());
                 b2.pop_back();
             }
             replace(false);
         }
 
-        // Finally, add the completely new item to MRU of T1
-        t1.push_front(key);
-        map[key] = {t1.begin(), T1};
-
+        // Insert new item into T1 (seen for first time)
+        t1.push_front(id);
+        map[id] = {t1.begin(), List::T1};
         return false;
     }
 };
