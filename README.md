@@ -188,9 +188,9 @@ String hashing on every access would pollute timing results with allocator and h
 
 **Why load the full trace into memory?**  
 Belady requires future knowledge by definition. Loading everything upfront gives all policies the same execution model and avoids two separate code paths for streaming vs. offline policies.
-
+<!--
 **Why not a slab allocator?**  
-Out of scope for this project. The question being studied is "given reasonable memory management, what are the tradeoffs between eviction policies?" — not "which policy benefits most from custom allocators."
+Out of scope for this project. The question being studied is "given reasonable memory management, what are the tradeoffs between eviction policies?" — not "which policy benefits most from custom allocators."-->
 
 ---
 
