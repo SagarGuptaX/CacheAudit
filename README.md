@@ -206,6 +206,6 @@ belady,hot_cold,10,0.423030,349,476,0
 
 ---
 
-## Related
+<!---## Related
 
-[NetServe](https://github.com/SagarGuptaX/NetServe) — a concurrent HTTP server written in C++ that exposes CacheAudit as a network service. NetServe wraps this binary: it accepts HTTP requests, shells out to `cache_audit`, and returns JSON. Together they form a pipeline that demonstrates both systems programming and backend service design.
+[NetServe](https://github.com/SagarGuptaX/NetServe) — a concurrent HTTP server written in C++ that exposes CacheAudit as a network service. NetServe wraps this binary: it accepts HTTP requests, shells out to `cache_audit`, and returns JSON. Together they form a pipeline that demonstrates both systems programming and backend service design.--->
